@@ -90,6 +90,63 @@ def _ME(nr,nc,t,td,p,mask):
             
     return me
 
+
+@nb.njit(fastmath=True)
+def _TW(nt,ta,rh,p):
+    
+    """ 
+    Minimizes the implicit equation:
+        
+        c p T + Lq = c p TW + εLe sat (TW)/p 
+        
+    Using the Newton-Rhapson method
+        
+    Note that t and td are in K; Tw is returned in K
+    
+    Note that this is the one-dimensional version of
+    the below
+        
+    """
+    tw=np.zeros(nt,dtype=np.float32)*np.nan
+    for _t in range(nt):
+                ni=0 # start iteration value
+                # Protect against "zero" rh
+                if rh[_t]<rh_thresh: td=_rhDew(rh_thresh,ta[_t])    
+                else:td=_rhDew(rh[_t],ta[_t])
+                # Initial guess. Assume saturation. 
+                x0=ta[_t]-0. 
+                f0=_IMP(x0,ta[_t],td,p[_t])
+                if np.abs(f0)<=eps: tw[_t]=x0; continue # Got it first go!
+                # Second guess, assume Tw=Ta-2    
+                xi=x0-2.;
+                fi=_IMP(xi,ta[_t],td,p[_t])
+                dx=(xi-x0)            
+                dfdx=(fi-f0)/dx # first gradient
+                if np.abs(fi)<=eps: tw[_t]=xi; continue # Got it 2nd go
+                while np.abs(fi)>eps and ni<itermax:
+                    xi=x0-f0/dfdx # new guess at Tw
+                    fi=_IMP\
+                        (xi,ta[_t],td,p[_t]) # error from this guess
+                    if np.abs(fi)<=eps: tw[_t]=xi; break # Exit if small error
+                    dx=(xi-x0)
+                    dfdx=(fi-f0)/dx # gradient at x0
+                    x0=xi*1. # Store old Tw
+                    f0=fi*1. # Store old error                    
+                    ni+=1  # Increment counter
+
+                # Catch odd behaviour of iteration 
+                # If it didn't converge, set to nan    
+                if ni == itermax: 
+                    xi=np.nan
+            
+                # If it did converge, but reached a value >ta, set to ta 
+                # [can happen when close to saturation and precision accepts
+                # solution >ta] 
+                elif xi >ta[_t,]:    
+                    xi=ta[_t]*1. # V. close to saturation, so set to ta
+    return tw
+
+
 @nb.njit(fastmath=True,parallel=True)    
 def _TW3d(nt,nr,nc,ta,q,p):
     
@@ -168,6 +225,9 @@ def _MDI(nt,nr,nc,tw,ta):
 			for _c in range(nc):
 				mdi[_t,_r,_c]=(tw[_t,_r,_c]-273.15)*0.75+(ta[_t,_r,_c]-273.15)*0.3
 	return mdi  
+
+
+
 
 
 

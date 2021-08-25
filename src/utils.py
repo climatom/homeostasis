@@ -11,6 +11,8 @@ Boiler-plate functions for fast humid heat computations
 import numpy as np
 import numba as nb
 from netCDF4 import Dataset
+import sys
+
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 # FUNCTIONS
@@ -59,6 +61,14 @@ def _satQ(t,p):
     satQ=rat*esat/(p-rat_rec*esat)
     return satQ
 
+@nb.njit(fastmath=True,parallel=True)
+def _satQ3d(t,p,nt,nr,nc):
+    out=np.zeros((nt,nr,nc))*np.nan
+    for _t in nb.prange(nt):
+        for _r in nb.prange(nr):
+            for _c in nb.prange(nc):
+                out[_t,_r,_c]=_satQ(t[_t,_r,_c],p[_t,_r,_c])
+    return out
 
 @nb.njit(fastmath=True)
 def _LvCp(t,q):

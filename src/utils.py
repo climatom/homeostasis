@@ -10,8 +10,9 @@ Boiler-plate functions for fast humid heat computations
 
 import numpy as np
 import numba as nb
+from numba import prange
 from netCDF4 import Dataset
-import sys
+import sys 
 
 
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
@@ -20,6 +21,7 @@ import sys
 
 eps=0.05 # Tw toleance (C)
 itermax=10 # max iterations for Tw convergence
+rh_thresh=1. # %. Below this, we assume RH is this. 
     
 @nb.njit(fastmath=True)
 def _satVP(t):
@@ -38,6 +40,24 @@ def _satVP(t):
         
     return esat
 
+@nb.njit(fastmath={"nnan":False},parallel=True)
+def _satVP_3D(nt,nr,nc,t):    
+    out=np.zeros((nt,nr,nc))*np.nan
+    for _t in prange(nt):
+        for _r in prange(nr):
+            for _c in prange(nc):
+                if np.isnan(t[_t,_r,_c]): continue
+                out[_t,_r,_c]=_satVP(t[_t,_r,_c])
+    return out
+
+@nb.njit(fastmath=True)
+def _rhDew(rh,t):
+   """ Dewpoint from t (K) and rh (%)"""
+   a1=611.21; a3=17.502; a4=32.19
+   t0=273.16
+   vp=_satVP(t)*rh/100.
+   dew=(a3*t0 - a4*np.log(vp/a1))/(a3 - np.log(vp/a1))
+   return dew
 
 @nb.njit(fastmath=True)
 def _satQ(t,p):
@@ -61,12 +81,13 @@ def _satQ(t,p):
     satQ=rat*esat/(p-rat_rec*esat)
     return satQ
 
-@nb.njit(fastmath=True,parallel=True)
+@nb.njit(fastmath={"nnan":False},parallel=True)
 def _satQ3d(t,p,nt,nr,nc):
     out=np.zeros((nt,nr,nc))*np.nan
     for _t in nb.prange(nt):
         for _r in nb.prange(nr):
             for _c in nb.prange(nc):
+                if np.isnan(t[_t,_r,_c]) or np.isnan(p[_t,_r,_c]): continue
                 out[_t,_r,_c]=_satQ(t[_t,_r,_c],p[_t,_r,_c])
     return out
 
@@ -101,7 +122,7 @@ def _ME(nr,nc,t,td,p,mask):
     return me
 
 
-@nb.njit(fastmath=True)
+@nb.njit(fastmath={"nnan":False},parallel=True)
 def _TW(nt,ta,rh,p):
     
     """ 
@@ -115,6 +136,8 @@ def _TW(nt,ta,rh,p):
     
     Note that this is the one-dimensional version of
     the below
+    
+    RH is in %
         
     """
     tw=np.zeros(nt,dtype=np.float32)*np.nan
@@ -157,7 +180,7 @@ def _TW(nt,ta,rh,p):
     return tw
 
 
-@nb.njit(fastmath=True,parallel=True)    
+@nb.njit(fastmath={"nnan":False},parallel=True)  
 def _TW3d(nt,nr,nc,ta,q,p):
     
     """ 
@@ -180,6 +203,9 @@ def _TW3d(nt,nr,nc,ta,q,p):
         for _c in range(nc):           
         
             for _t in range(nt):
+                
+                if np.isnan(ta[_t,_r,_c]) or np.isnan(q[_t,_r,_c]) or np.isnan(q[_t,_r,_c]): 
+                    continue
                             
                 ni=0 # start iteration value
                 
@@ -223,7 +249,7 @@ def _TW3d(nt,nr,nc,ta,q,p):
 
     return tw
 
-@nb.njit(fastmath=True,parallel=True)
+@nb.njit(fastmath={"nnan":False},parallel=True)
 def _MDI(nt,nr,nc,tw,ta):
 	"""
 	Tw and Ta should be input in K
@@ -236,8 +262,75 @@ def _MDI(nt,nr,nc,tw,ta):
 				mdi[_t,_r,_c]=(tw[_t,_r,_c]-273.15)*0.75+(ta[_t,_r,_c]-273.15)*0.3
 	return mdi  
 
+@nb.njit(fastmath={"nnan":False})
+def _IMP_TwTa(tw,t,p,rh):
+    
+    # _satQ(t,p)
+    qtw=_satQ(tw,p)
+    qt=_satQ(t,p)
+    qt=qt*rh/100.
+    Lv,Cp=_LvCp(t,qt)
+    diff=(Cp*t+qt*Lv)-(Cp*tw+qtw*Lv)
+    
+    return diff
 
+@nb.njit(fastmath={"nnan":False},parallel=True)
+def _TW_TD_2d(nr,nc,tw,rh,p):
+    
+    """ 
+    Minimizes the implicit equation:
+        
+        cp*Tw + ε*L*esat(Tw)/p = cp*Ta + ε*L*esat(Ta)/p*RH
+       
+    Using the Newton-Rhapson method
+        
+    Note that Tw is in K and rh is in %
+        
+    """
+    ta=np.zeros((nr,nc),dtype=np.float32)*np.nan
+    itermax=10 # max iterations
+    for _r in prange(nr):
+        
+        for _c in prange(nc):
+            
+                if np.isnan(tw[_r,_c]) or np.isnan(rh[_r,_c]) or np.isnan(p[_r,_c]): 
+                   continue
+                
+                ni=0 # start iteration value       
 
+                # Initial guess. Assume ta = tw+1 
+                x0=tw[_r,_c]+1
+                
+                # _IMP_TwTa(tw,t,p,rh)
+                f0=_IMP_TwTa(tw[_r,_c],x0,p[_r,_c],rh[_r,_c]) # Initial feval
+                
+                if np.abs(f0)<=eps: ta[_r,_c]=x0; continue # Got it first go!
+                # Second guess, assume Ta=Tw+2    
+                xi=x0+1.;
+                fi=_IMP_TwTa(tw[_r,_c],xi,p[_r,_c],rh[_r,_c])
+                dx=(xi-x0)            
+                dfdx=(fi-f0)/dx # first gradient
+                if np.abs(fi)<=eps: ta[_r,_c]=xi; continue # Got it 2nd go
+                while np.abs(fi)>eps and ni<itermax:
+                    xi=x0-f0/dfdx # new guess at Ta
+                    fi=_IMP_TwTa(tw[_r,_c],xi,p[_r,_c],rh[_r,_c]) # error from this guess                    
+                    if np.abs(fi)<=eps: ta[_r,_c]=xi; break # Exit if small error
+                    dx=(xi-x0)
+                    dfdx=(fi-f0)/dx # gradient at x0
+                    x0=xi*1. # Store old Tw
+                    f0=fi*1. # Store old error                    
+                    ni+=1  # Increment counter
+                        
+                # If it didn't converge, set to nan    
+                if ni == itermax: 
+                    tw[_r,_c]=np.nan
+            
+                # If it did converge, but reached a value >ta, set to ta 
+                # [can happen when close to saturation and precision accepts
+                # solution >ta] 
+                elif xi <tw[_r,_c]:    
+                    tw[_r,_c]=np.nan # V. close to saturation, so set to tai
+    return ta
 
 
 

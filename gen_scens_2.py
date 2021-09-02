@@ -55,7 +55,7 @@ yr_ref_start=1995
 yr_ref_stop=2014
 
 # gtas range to assess response over
-x=np.linspace(1.5,5.5,100)
+x=np.linspace(1.5,5.7,100)
 
 # Warming of 1995-2014 relative to first 20 years in HadCRT5?
 dT=0.87
@@ -296,7 +296,7 @@ if plot:
     gtas=pickle.load(open(fout_tas,"rb"))
        
 
-x=np.linspace(1.5,5.5,100)# Interp points
+x=np.linspace(1.5,5.7,100)# Interp points
 tw_i=np.zeros((len(x),tw.shape[1]))*np.nan # Allocate tw
 mdi_i=np.zeros(tw_i.shape)*np.nan # Allocate mdi
 
@@ -319,9 +319,9 @@ mdi_upper=np.nanmax(mdi_i,axis=1)
 # Plot
 fig,ax=plt.subplots(1,1)
 ax.fill_between(x,mdi_lower/ta,mdi_upper/ta,color='red',alpha=0.7)
-ax.plot(x,mdi_med/ta,color='red',label="MDI")
+ax.plot(x,mdi_med/ta,color='red',label="MDI",linewidth=3)
 ax.fill_between(x,tw_lower/ta,tw_upper/ta,color='blue',alpha=0.7)
-ax.plot(x,tw_med/ta,color='blue',label="Tw")
+ax.plot(x,tw_med/ta,color='blue',label="Tw",linewidth=3)
 ax.grid()
 ax.plot(mdi_ps[:,0],mdi_ps[:,1]/ta,color='orange',linestyle=":",linewidth=3)
 ax.plot(mdi_ps[:,0],mdi_ps[:,2]/ta,color='orange',linewidth=3,label="MDI$_{s}$")
@@ -330,7 +330,7 @@ ax.plot(mdi_ps[:,0],tw_ps[:,1]/ta,color='purple',linestyle=":",linewidth=3)
 ax.plot(mdi_ps[:,0],tw_ps[:,2]/ta,color='purple',linewidth=3,label="Tw$_{s}$")
 ax.plot(mdi_ps[:,0],tw_ps[:,3]/ta,color='purple',linestyle=":",linewidth=3)
 ax.set_ylim([0,np.max(mdi_ps[:,2])/ta*0.2])
-ax.set_xlim([1.5,5.5])
+ax.set_xlim([1.5,5.7])
 ax.set_ylabel(r"Area above threshold (%$\times$ 100)")
 ax.set_xlabel(r"Warming since pre-industrial ($^{\circ}$C)")
 ax.legend()

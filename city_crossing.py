@@ -103,6 +103,9 @@ dT=0.87
 crit_tw=35.
 crit_mdi=28/0.74
 
+# IPCC cut-off (upper end of upper-range under RCP8.5)
+ul=5.7 #C from PI
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -153,15 +156,18 @@ city_mdi_un=np.squeeze(un_mdi["mdi"][:,:]).data[row_col[:,0],row_col[:,1]]
 
 # Now compute the gtas warming required to push mdi and tw over the limit
 # This is simply (thresh-ref)/slope
-city["dt_tw"]=(crit_tw-city_tw_ref)/city_tw_slope
-city["dt_mdi"]=(crit_mdi-city_mdi_ref)/city_mdi_slope
+city["dt_tw"]=(crit_tw-city_tw_ref)/city_tw_slope + dT
+city["dt_mdi"]=(crit_mdi-city_mdi_ref)/city_mdi_slope + dT
 
 # Lower/upper
-city["dt_tw_upper"]=(crit_tw-city_tw_ref)/(city_tw_slope-city_tw_un)
-city["dt_tw_lower"]=(crit_tw-city_tw_ref)/(city_tw_slope+city_tw_un)
-city["dt_mdi_upper"]=(crit_mdi-city_mdi_ref)/(city_tw_slope-city_mdi_un)
-city["dt_mdi_lower"]=(crit_mdi-city_mdi_ref)/(city_tw_slope+city_mdi_un)
+city["dt_tw_upper"]=(crit_tw-city_tw_ref)/(city_tw_slope-city_tw_un) + dT
+city["dt_tw_lower"]=(crit_tw-city_tw_ref)/(city_tw_slope+city_tw_un) + dT
+city["dt_mdi_upper"]=(crit_mdi-city_mdi_ref)/(city_tw_slope-city_mdi_un) + dT
+city["dt_mdi_lower"]=(crit_mdi-city_mdi_ref)/(city_tw_slope+city_mdi_un) + dT
+city["tw_mdi_rat"]=city["dt_mdi"]/city["dt_tw"]
 
-# Closest on mdi? -- Give top 100
-city_mdi_sort=city.sort_values(by="dt_mdi").iloc[:100]
-city_tw_sort=city.sort_values(by="dt_tw").iloc[:100]
+# Front line mdi (dgtas<=ul)
+city_hot_mdi=city.loc[city["dt_mdi_lower"]<=ul]
+city_hot_tw=city.loc[city["dt_tw_lower"]<=ul]
+
+

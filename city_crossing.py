@@ -70,7 +70,6 @@ def closest_row_col(grid_lat,grid_lon,target_lat,target_lon,grid_res,n,mask,
     return row_col
 
 
-
 # ============================================================================
 
 # ============================================================================
@@ -92,6 +91,16 @@ un_tw_f="/home/lunet/gytm3/Homeostasis/CMIP6/Regressions/Regridded/enstd-tw.nc"
 # Mask file (1=land, 0=ocean)
 mf="/home/lunet/gytm3/Homeostasis/CMIP6/mask.nc"
 
+# Datadir
+datadir="/home/lunet/gytm3/Homeostasis/Data/"
+
+# Figure dir
+figdir="/home/lunet/gytm3/Homeostasis/Figures/"
+
+# Output files
+watchlist_mdi=datadir+"watchlist_mdi.csv"
+watchlist_tw=datadir+"watchlist_tw.csv"
+
 # Reference/historical years
 yr_ref_start=1995
 yr_ref_stop=2014
@@ -106,6 +115,9 @@ crit_mdi=28/0.74
 # IPCC cut-off (upper end of upper-range under RCP8.5)
 ul=5.7 #C from PI
 
+# Should we use the max in the reference period, or the mean?
+use="max"
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -113,13 +125,24 @@ ul=5.7 #C from PI
 
 # Read city data into array
 city=pd.read_csv(cityf,index_col=0)
+# fix str
+for c in ['1950', '1955', '1960', '1965',
+       '1970', '1975', '1980', '1985', '1990', '1995', '2000', '2005', '2010',
+       '2015', '2020', '2025', '2030', '2035']:
+    city[c]=[np.float(ii.replace(" ",""))*1000. for ii in city[c]]
 
 # Read reference tw/mdi and compute the mean over the reference years
 ref_years=np.arange(1981,2021)
 ref_idx=np.logical_and(ref_years>=yr_ref_start,ref_years<=yr_ref_stop)
-ref_tw=pickle.load(open(tw_ref_f,'rb'))[ref_idx,:,:].mean(axis=0)-273.15
-ref_mdi=pickle.load(open(mdi_ref_f,'rb'))[ref_idx,:,:].mean(axis=0)
-
+if use == "mean":
+    ref_tw=pickle.load(open(tw_ref_f,'rb'))[ref_idx,:,:].mean(axis=0)-273.15
+    ref_mdi=pickle.load(open(mdi_ref_f,'rb'))[ref_idx,:,:].mean(axis=0)
+elif use == "max":
+    ref_tw=pickle.load(open(tw_ref_f,'rb'))[ref_idx,:,:].max(axis=0)-273.15
+    ref_mdi=pickle.load(open(mdi_ref_f,'rb'))[ref_idx,:,:].max(axis=0)
+else: 
+    raise ValueError("Invalid value for 'use': %s "%use)
+    
 # Read in the mask 
 mask=xa.open_dataset(mf)
 grid_lat=mask.latitude[:].data
@@ -165,9 +188,68 @@ city["dt_tw_lower"]=(crit_tw-city_tw_ref)/(city_tw_slope+city_tw_un) + dT
 city["dt_mdi_upper"]=(crit_mdi-city_mdi_ref)/(city_tw_slope-city_mdi_un) + dT
 city["dt_mdi_lower"]=(crit_mdi-city_mdi_ref)/(city_tw_slope+city_mdi_un) + dT
 city["tw_mdi_rat"]=city["dt_mdi"]/city["dt_tw"]
+city["un_tw"]=city["dt_tw_upper"]-city["dt_tw_lower"]
+city["un_mdi"]=city["dt_mdi_upper"]-city["dt_mdi_lower"]
 
 # Front line mdi (dgtas<=ul)
-city_hot_mdi=city.loc[city["dt_mdi_lower"]<=ul]
-city_hot_tw=city.loc[city["dt_tw_lower"]<=ul]
+city_hot_mdi=city.loc[city["dt_mdi"]<=ul]
+city_hot_tw=city.loc[city["dt_tw"]<=ul]
 
+# Order, and write out selected columns (place, country, dt_mdi, un, ditto tw)
+city_hot_mdi=city_hot_mdi.sort_values(by="dt_mdi")
+write=city_hot_mdi[["Place","country","dt_mdi","un_mdi","dt_tw","un_tw","2020"]]\
+                                                    .to_csv(watchlist_mdi)
+city_hot_tw=city_hot_tw.sort_values(by="dt_tw")
+write=city_hot_tw[["Place","country","dt_mdi","un_mdi","dt_tw","un_tw","2020"]]\
+                                                    .to_csv(watchlist_tw)
+with open(watchlist_mdi.replace(".csv",".formatted.csv"),'w') as fo:
+    for i in range(len(city_hot_mdi)):
+        items=city_hot_mdi.iloc[i][["Place","country","dt_mdi","un_mdi",
+                                    "dt_tw","un_tw"]]
+        line=items[0]+","+items[1]+",%.2f (%.2f)"%(items[2],items[3])+\
+        ",%.2f (%.2f)"%(items[4],items[5]) +"\n"
+        fo.write(line)                                                                  
+
+
+# Ordered
+city_mdi_rank=city.sort_values(by="dt_mdi")[:100]
+city_tw_rank=city.sort_values(by="dt_tw")[:100]
+
+# Countries?
+corrections={"Iran (Islamic Republic of)":"Iran",
+             "United Arab Emirates": "UAE",
+             "United States of America": "USA",
+             "Saudi Arabia": "SA",            
+             }
+
+country_mdi={}; country_tw={}
+for i in np.unique(city_hot_mdi["country"]): 
+    if i in corrections.keys(): key_out=corrections[i]
+    else: key_out=i
+    country_mdi[key_out]=0
+    country_tw[key_out]=0
+
+# Loop over countries in country_mdi, compute total, and then find 
+# out what's happening with Tw
+
+for j in range(len(city_hot_mdi)):
+    country=city_hot_mdi["country"].iloc[j]
+    place=city_hot_mdi["Place"].iloc[j]
+    if country in corrections.keys():
+        key_out=corrections[country]
+    else: key_out=country
+    country_mdi[key_out]+=city_hot_mdi["2020"].iloc[j]/1e6
+    if place in city_hot_tw["Place"].values[:]:
+        country_tw[key_out]+=\
+            city_hot_tw.loc[city_hot_tw["Place"]==place]["2020"].values[0]/1e6
+
+frame=pd.DataFrame(data={"MDI":country_mdi.values(),\
+                         "Tw":country_tw.values()},index=country_mdi.keys())
+frame=frame.sort_values(by="MDI",ascending=False)
+fig,ax=plt.subplots(1,1)
+frame.plot.bar(ax=ax,color=["red","blue"])
+ax.set_ylabel("Population (million)")
+plt.tight_layout()
+fig.savefig(figdir+"City_watchlist.png",dpi=300)
+    
 

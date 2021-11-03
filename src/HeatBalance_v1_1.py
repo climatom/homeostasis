@@ -8,7 +8,7 @@ Detailed description to follow
 
 """
 import numpy as np, numba as nb, pandas as pd
-from src import utils
+import utils
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from scipy.optimize import minimize
@@ -419,7 +419,6 @@ if __name__=="__main__":
     crit_rh=CRIT_RH(ta_ill,met_ill,va_ill,s_ill).x
     tw_ill=utils._TW(1,np.atleast_1d(ta_ill)+273.15,np.atleast_1d(crit_rh),
                    np.array([101300.,]))-273.15
-    assert 1==2
     
     
     rhs=np.linspace(5,100,100)

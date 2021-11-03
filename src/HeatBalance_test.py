@@ -8,7 +8,7 @@ Detailed description to follow
 
 """
 import numpy as np, numba as nb, pandas as pd
-from src import utils
+import utils
 import matplotlib.pyplot as plt
 import statsmodels.api as sm
 from scipy.optimize import minimize
@@ -24,7 +24,7 @@ AR_AD=0.77 # Ratio of effective radiative area to body surface area
 emiss=0.95 # Thermal emissivity
 boltz=5.67*10**-8 # Boltzmann constant
 latent_vap=2430.0 # latent heat of vaporization (2430 J/g)
-fix_skin=True # Fix the skin surface temperature? [Bool]
+fix_skin=False # Fix the skin surface temperature? [Bool]
 _tsk=35. # Skin surface temperature, if fixed [deg C])
 const_hr=False
 _hr=4.70
@@ -43,7 +43,15 @@ va_lower=0.2
 va_upper=3.5
 nsim=1000 # Monte Carlo simulations
 crit_sed=28/0.74 # From Kenney et al. (2004)
+# Human specific heat capacity 
+cp_h=3470. # J/kg/K
+# Human mass
+hmass=70.# Kg
+
 figdir="/home/lunet/gytm3/Homeostasis/Figures/"
+font = {'family' : 'normal',
+        'size'   :6}
+plt.rc('font', **font)
 # + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + +
 
 # + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + +
@@ -54,7 +62,7 @@ figdir="/home/lunet/gytm3/Homeostasis/Figures/"
 # Dry heat
 #*   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *
        
-@nb.jit('float64(float64,float64,float64)')
+@nb.njit('float64(float64,float64,float64)')
 def DRYHEAT(tsk,to,ia):
     # Notes:
     # tskin in c
@@ -63,7 +71,7 @@ def DRYHEAT(tsk,to,ia):
     return c
 
 
-@nb.jit('float64(float64,float64,float64,float64,float64)')
+@nb.njit('float64(float64,float64,float64,float64,float64)')
 def TSKIN(ta,mrt,pa,tre,va):
     # Notes: 
     # pa is ambient water vapour pressure in kPa
@@ -76,7 +84,7 @@ def TSKIN(ta,mrt,pa,tre,va):
         tskin=7.2+0.064*ta+0.061*mrt+0.198*pa-0.348*va+0.616*tre 
     return tskin# [deg C]
         
-@nb.jit('float64(float64,float64)')
+@nb.njit('float64(float64,float64)')
 def VP_PARSONS(ta,rh):
     # Notes:
     # ta is in deg C
@@ -85,7 +93,7 @@ def VP_PARSONS(ta,rh):
     pa=np.exp(18.956-4030.18/(ta+235))/rh*0.1
     return pa
 
-@nb.jit('float64(float64,float64)')
+@nb.njit('float64(float64,float64)')
 def VP_TETENS(ta,rh):
     # Notes:
     # ta is in degC
@@ -105,7 +113,7 @@ def VP_TETENS(ta,rh):
     pa=pa*rh*0.001
     return pa
 
-@nb.jit('float64(float64,float64,float64,float64)')
+@nb.njit('float64(float64,float64,float64,float64)')
 def TO(hr,tr,hc,ta):
     # Notes:
     # hr and hc are radiative and convective transfer coefficients, resp.
@@ -113,7 +121,7 @@ def TO(hr,tr,hc,ta):
     to=(hr*tr+hc*ta)/(hr+hc)
     return to
 
-@nb.jit('float64(float64,float64)')
+@nb.njit('float64(float64,float64)')
 def HR(tsk,tre):
     # Notes
     # tsk is skin temperature in deg C
@@ -123,7 +131,7 @@ def HR(tsk,tre):
     if const_hr: hr =_hr
     return hr
 
-@nb.jit('float64(float64)')    
+@nb.njit('float64(float64)')    
 def HC(va):
     # Notes:
     # va (global) is in m/s
@@ -131,7 +139,7 @@ def HC(va):
     hc=8.3*np.power(va,0.6)
     return hc
 
-@nb.jit('float64(float64,float64)')  
+@nb.njit('float64(float64,float64)')  
 def IA(hc,hr):
     # Notes
     # computes the thermal insulation provided by the air layer surrounding
@@ -142,7 +150,7 @@ def IA(hc,hr):
 #*   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *
 # Evaporative heat 
 #*   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *
-@nb.jit('float64(float64,float64)') 
+@nb.njit('float64(float64,float64)') 
 def ESWEAT(swmax,eff):
     # Notes
     # swmax is in W/m**2
@@ -151,7 +159,7 @@ def ESWEAT(swmax,eff):
     esweat=swmax*eff
     return esweat
 
-@nb.jit('float64(float64,float64)')
+@nb.njit('float64(float64,float64)')
 def SWMAX(swprod,ta):
     # Notes:
     # Includes the dependnecy of latent heat of vaporization on temperature, 
@@ -164,7 +172,7 @@ def SWMAX(swprod,ta):
     swmax=swprod*swlatent/3600.
     return swmax
     
-@nb.jit('float64(float64,float64,float64)')
+@nb.njit('float64(float64,float64,float64)')
 def EFF(swmax,emax,hreq=0.0):
     # Notes:
     # returns dimensionless skin wettedness (proportion of AD covered by sweat)
@@ -189,7 +197,7 @@ def EFF(swmax,emax,hreq=0.0):
     
     return eff
 
-@nb.jit('float64(float64,float64,float64)')
+@nb.njit('float64(float64,float64,float64)')
 def EMAX(pask,pa,rea):
     # Notes:
     # pask is the saturation vapour pressure at the skin temperature (kPa)
@@ -198,7 +206,7 @@ def EMAX(pask,pa,rea):
     emax=(pask-pa)/rea    
     return emax
   
-@nb.jit('float64(float64)')   
+@nb.njit('float64(float64)')   
 def REA(hc):
     # Returns the evaportaive resistance given the convective exchange
     # coefficient. Units are 1/(W x m**2 x kPa)
@@ -212,19 +220,26 @@ def REA(hc):
 # Respiratory heat loss
 #*   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *
 
-@nb.jit('float64(float64,float64)')
+@nb.njit('float64(float64,float64)')
 def CRES(ta,met):
     # returns dry respiratory loss in W/m**2 using ta (deg C) and 
     # met -- global parameter (metabolic heat in W/m**2)
     cres=0.0014*met*(34.-ta)
     return cres
 
-@nb.jit('float64(float64,float64)')  
+@nb.njit('float64(float64,float64)')  
 def ERES(pa,met):
     # returns evaporative respiratory loss in W/m**2 using pa (kPa) and 
     # met -- global parameter (metabolic heat in W/m**2)
     eres=0.0173*met*(5.87-pa)
     return eres
+
+@nb.njit('float64(float64)')  
+def dTdt(s):
+    # Takes the current flux and returns the rate of temperature change, if
+    # s is positive
+    _dTdt=np.max(np.array([0,s/cp_h]))*AD*60./hmass
+    return _dTdt
 
 #*   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *   *
 # Coordinating functions
@@ -410,22 +425,16 @@ def CRIT_RH(ta,met,va,swrate):
 # MAIN 
 # + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + + +
 if __name__=="__main__":
-    
-    # Find swprod at inflection point for given T/RH
-    ta_ill=54.4
-    met_ill=65.
-    va_ill=0.2
-    s_ill=3./AD
-    crit_rh=CRIT_RH(ta_ill,met_ill,va_ill,s_ill).x
-    tw_ill=utils._TW(1,np.atleast_1d(ta_ill)+273.15,np.atleast_1d(crit_rh),
-                   np.array([101300.,]))-273.15
-    assert 1==2
-    
-    
-    rhs=np.linspace(5,100,100)
-    nt=len(rhs)
-    store=np.zeros((nt,nsim))
-    pc_complete=0
+    nsim=1000
+    ta=np.arange(25,50)
+    rh=np.ones(len(ta))*45.
+    p=np.ones(len(ta))*101300.
+    dt=np.zeros((len(ta),nsim))
+    tw=utils._TW(len(ta),ta+273.15,rh,p)
+    mdi=0.75*(tw-273.15)+0.3*ta
+    s=np.zeros((dt.shape))
+
+    me= utils._ME1D(len(ta),ta+273.15,rh,p)/1000.
     for i in range(nsim):
         # Set sweat
         sweat_rate=np.random.uniform(sweat_lower,sweat_upper)
@@ -434,40 +443,35 @@ if __name__=="__main__":
         met=np.random.uniform(met_lower,met_upper)
         # Set wind
         va=np.random.uniform(va_lower,va_upper)
-        
-        ## Compute critical t for every rh combination ##
-        store[:,i]=CRIT_T(rhs,met,va,swprod,n=nt,out=np.zeros(nt))
+        s[:,i]=np.array([\
+            HB(ta[ii],rh[ii],met,va,swprod) for ii in range(len(ta))])
+        dt[:,i]=np.array([\
+            dTdt(s[ii,i]) for ii in range(len(ta))])*60
+
+    ds_av=np.median(s,axis=1)/1000.
+    ds_lower=np.percentile(s,25,axis=1)/1000.
+    ds_upper=np.percentile(s,75,axis=1)  /1000.          
+    dt_av=np.median(dt,axis=1)
+    dt_lower=np.percentile(dt,25,axis=1)
+    dt_upper=np.percentile(dt,75,axis=1)
     
-    # Plotting the sensitivity 
-    pcl=np.percentile(store,5,axis=1)
-    pcu=np.percentile(store,95,axis=1)
-    pcmid=np.percentile(store,50,axis=1)
-    # Compute reference Tw and MDI
-    ref_ta=np.linspace(np.min(store),np.max(store),100)
-    ref_rh=np.linspace(np.min(rhs),np.max(rhs),100)
-    ref_ta,ref_rh=np.meshgrid(ref_ta,ref_rh)
-    nr,nc=ref_ta.shape
-    nt=len(ref_ta.flatten())
-    ref_tw=utils._TW(nt,ref_ta.flatten()+273.15,
-                  ref_rh.flatten(),np.ones(nt)*101300.)-273.15
-    # Rehshape
-    ref_mdi=(0.75*ref_tw+0.3*ref_ta.flatten()).reshape(nr,nc)
-    ref_tw=ref_tw.reshape(nr,nc)
-    
-    fig,ax=plt.subplots(1,1)
-    ax.plot(pcl,rhs,alpha=1,color='grey',linestyle='--')
-    ax.plot(pcu,rhs,alpha=1,color='grey',linestyle='--')
-    ax.plot(pcmid,rhs,alpha=1,color='black',linestyle='-')
-    ax.contour(ref_ta,ref_rh,ref_mdi,levels=[crit_sed,],colors='red')
-    ax.contour(ref_ta,ref_rh,ref_tw,levels=[35,],colors='blue')
-    ax.grid()
-    ax.set_xlim(30,55)
-    ax.set_ylim(20,100)
-    ax.set_ylabel("Relative humidity (%)")
-    ax.set_xlabel("Air temperature ($^{\circ}$C)")
-    fig.savefig(figdir+"isosweat-%.0f.png"%isoeff,dpi=300)
-    
-    
+fig,ax=plt.subplots(1,1)
+fig.set_size_inches(3,2)
+ax.plot(me,ds_av,color='k')
+ax.fill_between(me,ds_lower,ds_upper,color='k',alpha=0.2)    
+ax2=ax.twinx()
+ax2.plot(me,dt_av,color='red')
+ax2.fill_between(me,dt_lower,dt_upper,color='red',alpha=0.5) 
+ax.grid() 
+ax.axhline(0,color='k',linestyle="--",linewidth=2)
+ax.set_ylabel("Heat gain from atmosphere [J g$^{-1}$ s$^{-1}$]")
+ax2.set_ylabel("Core temperature change  [$^{\circ}$C min$^{-1}$]",
+               color='red')
+ax.set_xlabel("Moist enthalpy of atmosphere [J g$^{-1}$]")
+# ax2.set_ylim(0,0.3)
+ax.set_xlim(me.min(),me.max()+1)
+plt.tight_layout()
+# fig.savefig(figdir+"Response2rev.png",dpi=300)    
     
     # for i in range(nsim):
         # Compute the wetbulb temp and 

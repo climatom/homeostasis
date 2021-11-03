@@ -58,6 +58,23 @@ def reg(grid,covariate,nr,nc,window):
                rates[row,col]=fit_poly(x,y,1)[0]
     return rates
 
+@njit(parallel=True,fastmath={"nnan":False})
+def corr(grid,covariate,nr,nc,window):
+    rs=np.zeros((nr,nc))*np.nan
+    for row in prange(nr):
+       for col in prange(nc): 
+           if np.isnan(grid[0,row,col]): 
+               continue
+           else:
+               # Smooth and compute slope
+               x=np.convolve(covariate,np.ones(window))[window-1:1-window]\
+                             /np.float(window)
+               y=np.convolve(grid[:,row,col],np.ones(window))[window-1:1-window]\
+                             /np.float(window)
+  
+               rs[row,col]=np.corrcoef(x,y)[0,1]
+    return rs
+
 # Smoothing paramater (years)
 window=20
 
@@ -122,12 +139,22 @@ for ii in range(len(tw_files)):
     
     # Match index
     idx_gtas=np.isin(gtas_years,tw_years)
+    idx_tw=np.isin(tw_years,gtas_years)
     
     # Extract gtas to match 
     gtas=np.squeeze(gtas_f["tas"].data[idx_gtas])
     
     # Read in the tw array
-    tw=tw_f["tw"].data[:,:,:]
+    tw=tw_f["tw"].data[idx_tw,:,:]
+    
+    
+    # Ccorrelate extreme Tw and global mean tas
+    write=xa.DataArray(data=corr(tw,gtas,tw.shape[1],tw.shape[2],window),
+                       dims=["lat","lon"],
+                       coords={"lat":lat,"lon":lon},name="r",
+                       attrs={"units":"na"}).\
+                       to_netcdf(odir+mod_tw+"_tw_correl.nc")    
+    
     
     # Compute the regression coefs
     write=xa.DataArray(data=reg(tw,gtas,tw.shape[1],tw.shape[2],window),
@@ -138,8 +165,16 @@ for ii in range(len(tw_files)):
     del tw
     print("Finished with tw")
     
-    # Read in the mdi and repeat the regression
-    mdi=mdi_f["mdi"].data[:,:,:]
+    # Read in the mdi and repeat 
+    # Correlate   
+    mdi=mdi_f["mdi"].data[idx_tw,:,:] # Note that we re-use idx_tw
+    write=xa.DataArray(data=corr(mdi,gtas,mdi.shape[1],mdi.shape[2],window),
+                       dims=["lat","lon"],
+                       coords={"lat":lat,"lon":lon},name="r",
+                       attrs={"units":"na"}).\
+                       to_netcdf(odir+mod_tw+"_mdi_correl.nc")    
+    
+    # Regress
     write=xa.DataArray(data=reg(mdi,gtas,mdi.shape[1],mdi.shape[2],window),
                        dims=["lat","lon"],
                        coords={"lat":lat,"lon":lon},name="mdi",
@@ -150,9 +185,9 @@ for ii in range(len(tw_files)):
     
     # Read in tas and huss. We are going to use this to evaluate 
     # RH during peak TW
-    tas=tas_f["tas_tw"].data[:,:,:]  
-    huss=huss_f["huss_tw"].data[:,:,:]
-    ps=ps_f["ps_tw"].data[:,:,:] 
+    tas=tas_f["tas_tw"].data[idx_tw,:,:]  # Again - here and below, re-use idx
+    huss=huss_f["huss_tw"].data[idx_tw,:,:]
+    ps=ps_f["ps_tw"].data[idx_tw,:,:] 
     nt,nr,nc=tas.shape
     satq=src.utils._satQ3d(tas,ps,nt,nr,nc)
     rh=huss/satq
@@ -161,6 +196,9 @@ for ii in range(len(tw_files)):
                        coords={"lat":lat,"lon":lon},name="rh",
                        attrs={"units":"dRHdfracTg"}).\
                        to_netcdf(odir+mod_tw+"_rh.nc")   
+    
+    
+    
     del tas, huss, ps,  rh
     
     # Use cdo to regrid and mask all the files just written
@@ -171,6 +209,13 @@ for ii in range(len(tw_files)):
                                                     odir_regrid+mod_tw+fr)
         fail=os.system(cmd); assert fail==0, "This failed - %s"%cmd 
         
+    # Repeat correlation coefficients   
+    for fr in ["_tw_correl.nc","_mdi_correl.nc"]:
+        cmd="cdo -O -s mul -remapbil,%s %s %s %s" %(target_grid,
+                                                    odir+mod_tw+fr,
+                                                    mask,
+                                                    odir_regrid+mod_tw+fr)
+        fail=os.system(cmd); assert fail==0, "This failed - %s"%cmd         
         
     print("Processed model %s"%mod_tw)
     
@@ -186,8 +231,19 @@ for fr in ["_tw.nc","_mdi.nc","_rh.nc"]:
     #Std
     cmd="cdo -O -s ensstd %s %s" % (fs,oname_std)
     fail=os.system(cmd); assert fail==0, "This failed - %s"%cmd    
-    
 
+# Correlation coefs
+for fr in ["_tw_correl.nc","_mdi_correl.nc",]:
+    fs=" ".join([odir_regrid+ii for ii in os.listdir(odir_regrid) \
+                 if fr in ii])
+    oname_mean=odir_regrid+fr.replace(".nc","-ensmean.nc")
+    oname_std=odir_regrid+fr.replace(".nc","-enstd.nc")
+    #Mean
+    cmd="cdo -O -s ensmean %s %s" % (fs,oname_mean)
+    fail=os.system(cmd); assert fail==0, "This failed - %s"%cmd
+    #Std
+    cmd="cdo -O -s ensstd %s %s" % (fs,oname_std)
+    fail=os.system(cmd); assert fail==0, "This failed - %s"%cmd 
     
     
     
